@@ -1,0 +1,247 @@
+---
+title: "Lb 8 Clustering"
+author: "Roupen Khanjian"
+date: "2/27/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(here)
+library(janitor)
+library(palmerpenguins)
+
+# Packages for cluster analysis:
+library(NbClust)
+library(cluster)
+library(factoextra)
+library(dendextend)
+library(ggdendro)
+```
+
+
+# Intro to cluster analysis (k-means, hierarchical)
+
+## part 1 K-MEANS CLUSTERING:
+
+Using `palmerpenguins` dataset
+
+#### EDA
+
+```{r}
+# Bill length versus depth exploratory plot:
+ggplot(data = penguins) +
+  geom_point(aes(x = bill_length_mm,
+                 y = bill_depth_mm,
+                 color = species,
+                 shape = sex),
+             alpha = 0.7,
+             size = 3) +
+  scale_color_manual(values = c("orange", "cyan4", "darkmagenta"))
+
+```
+
+
+```{r}
+# Flipper length versus body mass exploratory plot: 
+ggplot(penguins) +
+  geom_point(aes(x = flipper_length_mm, 
+                 y = body_mass_g, 
+                 color = species,
+                 shape = sex),
+             size = 3,
+             alpha = 0.7) +
+  scale_color_manual(values = c("orange","cyan4","darkmagenta"))
+```
+
+### pick number of clusters
+
+Using the function `NBClust`, which can specify the distance measure, the min and max # of clusters you want, and the cluistering methods. 
+
+Using the 4 columns of the penguins dataset that are numeric, continious variables. 
+
+
+```{r}
+
+number_est <- NbClust(data = penguins[3:6],
+                      min.nc = 2,
+                      max.nc = 10, 
+                      method = "kmeans")
+
+number_est
+
+
+# By these estimators, 2 is identified as the best number of clusters by the largest number of algorithms (8 / 30)...but should that change our mind? Maybe...but here I think it makes sense to still stick with 3 (a cluster for each species) and see how it does. 
+
+
+```
+
+### Create a complete and scaled version of the data. 
+
+Going to use 3 clusters, though thee may be a case to choose 2 since Adelie and chinstrap penguins are pretty similar. To do this, we are going to drop any observations where we have a missing value for one of the 4 variables. Sometimes want to impute the missing values instead though. 
+
+```{r}
+
+# drop rows with missing values for the 4 columns
+penguins_complete <- penguins %>% 
+  drop_na(bill_length_mm, bill_depth_mm, body_mass_g, flipper_length_mm)
+
+# only keep numerical columns we are working with, then scale them. 
+penguins_scale <- penguins_complete %>% 
+  select(ends_with("mm"), body_mass_g) %>% 
+  scale() 
+
+```
+
+### do k-means
+
+```{r}
+penguins_km <- kmeans(penguins_scale, centers = 3)
+
+# how many observations are assigned to each cluster?
+penguins_km$size
+
+# what cluster is each obs in penguins_scale assigned to?
+penguins_km$cluster
+
+# combine data with cluster number from kmeans and see how it was clustered
+penguins_c1 <- data.frame(penguins_complete,
+                          cluster_no = factor(penguins_km$cluster))
+
+# plot flipper lngth vs body mass, indicitaing which sluter each penguin is assigned to 
+
+ggplot(data = penguins_c1) +
+  geom_point(aes(x = flipper_length_mm,
+                 y = body_mass_g,
+                 color = cluster_no,
+                 shape = species),
+             size = 2.5,
+             alpha = 0.75)
+
+# plot with bill_length_mm vs bill_depth_mm
+
+ggplot(data = penguins_c1) +
+  geom_point(aes(x = bill_length_mm,
+                 y = bill_depth_mm,
+                 color = cluster_no,
+                 shape = species),
+             size = 2.5,
+             alpha = 0.75)
+
+# could be the case for 2 clusters, adelie + chinstrap and gentoo since some chinstrap was incorrectly clustered as adelie.
+```
+
+
+```{r}
+
+penguins_c1 %>% 
+  count(species, cluster_no) %>% 
+  pivot_wider(names_from = cluster_no, values_from = n) %>% 
+  rename(`cluster 1` = 1, `cluster 2` = 2, `cluster 3` = 3)
+  
+```
+
+Most chinstraps are in cluster 1, most adelie are in cluster 2, AND all the gentoos are in cluster 3. Thus, the k-means clustering does a good job, but can make the case for only 2 clusters. COOL!
+
+## part 2 Hierarchical clustering
+
+use `stats::hclust` function for agglomerative hierarchical clusting using worldbank environmental data from data set in project file. 
+
+```{r}
+
+wb_env <- read_csv("wb_env.csv")
+
+# View(wb_env)
+
+# only keep top 20 greenhouse gas emitters
+
+wb_ghg_20 <- wb_env %>% 
+  arrange(-ghg) %>% 
+  head(20)
+
+
+
+```
+
+### scale the data
+
+```{r}
+
+# scale and select the numeric variables
+wb_scaled <- wb_ghg_20 %>% 
+  select(3:7) %>% 
+  scale()
+
+# update to add rownames (county names) from wb_ghg_20
+rownames(wb_scaled) <- wb_ghg_20$name
+
+```
+
+### find euclidean distances
+
+Use `stat::dist()` function to find euc distances in multivarite spce between the different observations
+
+```{r}
+
+# compute dissimilarty values (euclidean disteances):
+euc_distance <- dist(wb_scaled, method = "euclidean")
+
+euc_distance
+
+```
+
+Can see that we can manually create the dendogram, but yay R
+
+### perfrom hierarchical clustering by complete linkage with stats::hclust()
+
+`stats::hclust` function performs hierarchical cluserting, given a dissimilarity matrix (matrix of euclidean distances) using a linkage we specifiy
+
+
+```{r}
+
+# hierarchical clustering (complete linkage)
+hc_complete <- hclust(euc_distance, method = "complete")
+
+#plot
+par(mfrow = c(1,1))
+plot(hc_complete, cex = 0.6, hang = -1)
+
+# single linkage
+hc_single <- hclust(euc_distance, method = "single")
+
+# plot it
+plot(hc_single, cex = 0.6, hang = -1)
+
+```
+
+### make a tanglegram to compare dendrograms
+
+Make a tanglegram to compare clustering by complete and single linkage. use `dendextend::tanglegram`
+
+```{r}
+# convert to class dendrogram
+dend_complete <- as.dendrogram(hc_complete)
+dend_single <- as.dendrogram(hc_single)
+
+tanglegram(dend_complete, dend_single)
+```
+
+Can compare how the 2 types of linkages calculate clustering. 
+
+### plotting dendrograms in ggplot!
+
+`ggdendrogram`
+
+```{r}
+ggdendrogram(data = hc_complete,# from hclust function
+             rotate = TRUE) +
+  theme_minimal() +
+  labs(x = "Country")
+```
+
+COOL!
+
+
+
